@@ -67,9 +67,9 @@ class Application:
             # 打印统计信息
             await self.print_stats()
 
-            # 保持运行
+            # 保持运行（使用短间隔以便快速响应退出信号）
             while self.running:
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.1)
 
         except KeyboardInterrupt:
             logger.info('收到退出信号 (Ctrl+C)')
@@ -80,8 +80,12 @@ class Application:
 
     async def stop(self):
         """停止应用"""
-        if not self.running:
+        # 使用标志防止重复停止
+        if hasattr(self, '_stopping') and self._stopping:
             return
+
+        self._stopping = True
+        self.running = False
 
         logger.info('正在停止应用...')
 
@@ -95,11 +99,12 @@ class Application:
             # 关闭数据库
             await db.close()
 
-            self.running = False
             logger.info('应用已停止')
 
         except Exception as e:
             logger.error(f'停止应用时发生错误: {e}', exc_info=True)
+        finally:
+            self._stopping = False
 
     async def print_stats(self):
         """打印统计信息"""
@@ -120,11 +125,22 @@ class Application:
 def setup_signal_handlers(app: Application, loop):
     """设置信号处理器"""
 
+    # 记录按了几次 Ctrl+C
+    signal_count = {'count': 0}
+
     def signal_handler(signum):
-        logger.info(f'收到信号 {signum}，准备退出...')
-        app.running = False
-        # 立即停止事件循环以防止卡死
-        loop.call_soon_threadsafe(loop.stop)
+        signal_count['count'] += 1
+
+        if signal_count['count'] == 1:
+            logger.info(f'收到信号 {signum}，准备退出... (再次按 Ctrl+C 强制退出)')
+            app.running = False
+            # 创建一个任务来执行清理
+            asyncio.create_task(app.stop())
+        else:
+            logger.warning(f'收到第 {signal_count["count"]} 次退出信号，强制退出')
+            # 强制退出，不等待清理
+            import os
+            os._exit(0)
 
     # 在 asyncio 事件循环中正确设置信号处理
     for sig in (signal.SIGINT, signal.SIGTERM):

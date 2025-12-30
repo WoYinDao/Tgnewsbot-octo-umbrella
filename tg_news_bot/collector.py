@@ -50,8 +50,14 @@ class Collector:
     async def close(self):
         """关闭客户端"""
         if self.client:
-            await self.client.disconnect()
-            logger.info('Telethon 客户端已关闭')
+            try:
+                # 添加超时保护防止卡死
+                await asyncio.wait_for(self.client.disconnect(), timeout=5.0)
+                logger.info('Telethon 客户端已关闭')
+            except asyncio.TimeoutError:
+                logger.warning('关闭 Telethon 客户端超时，强制继续')
+            except Exception as e:
+                logger.error(f'关闭 Telethon 客户端失败: {e}')
 
     @staticmethod
     def clean_text(text: str) -> str:

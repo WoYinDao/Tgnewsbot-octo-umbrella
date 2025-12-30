@@ -50,19 +50,26 @@ class Publisher:
             text = truncate_message(text, MESSAGE_MAX_LENGTH)
 
             # 发送消息（python-telegram-bot 13.x 是同步的，在线程池中运行）
+            # 添加超时防止卡死
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: self.bot.send_message(
-                    chat_id=TARGET_CHAT_ID,
-                    text=text,
-                    parse_mode=parse_mode,
-                    disable_web_page_preview=False
-                )
+            await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: self.bot.send_message(
+                        chat_id=TARGET_CHAT_ID,
+                        text=text,
+                        parse_mode=parse_mode,
+                        disable_web_page_preview=False
+                    )
+                ),
+                timeout=10.0  # 10 秒超时
             )
             logger.info('消息已发送到目标频道')
             return True
 
+        except asyncio.TimeoutError:
+            logger.error('发送消息超时 (10秒)')
+            return False
         except TelegramError as e:
             error_msg = str(e)
             if 'Chat not found' in error_msg or 'chat not found' in error_msg.lower():
@@ -93,8 +100,15 @@ class Publisher:
             logger.info(f'找到 {len(messages)} 条待发布快讯')
 
             published_count = 0
+            consecutive_failures = 0  # 连续失败计数器
+            max_consecutive_failures = 3  # 最多连续失败次数
 
             for msg in messages:
+                # 如果连续失败太多次，停止尝试
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.warning(f'连续失败 {consecutive_failures} 次，停止发布剩余消息')
+                    break
+
                 try:
                     # 格式化消息
                     formatted_text = format_breaking_news(msg)
@@ -106,12 +120,14 @@ class Publisher:
                         # 标记为已发布
                         await db.mark_as_published(msg['id'])
                         published_count += 1
+                        consecutive_failures = 0  # 重置失败计数
                         logger.info(f"快讯已发布: {msg['category']} - {msg['summary'][:50]}")
 
                         # 限速：避免触发 Telegram 限制
                         await asyncio.sleep(1)
                     else:
-                        logger.warning(f"快讯发布失败: {msg['id']}")
+                        consecutive_failures += 1
+                        logger.warning(f"快讯发布失败 (连续失败: {consecutive_failures}/{max_consecutive_failures}): {msg['id']}")
 
                 except Exception as e:
                     logger.error(f"发布消息 {msg['id']} 失败: {e}", exc_info=True)

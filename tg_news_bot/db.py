@@ -1,6 +1,7 @@
 """
 数据库模块 - SQLite 封装
 """
+import asyncio
 import aiosqlite
 import hashlib
 import logging
@@ -50,8 +51,13 @@ class Database:
     async def close(self):
         """关闭数据库连接"""
         if self.conn:
-            await self.conn.close()
-            logger.info('数据库连接已关闭')
+            try:
+                await asyncio.wait_for(self.conn.close(), timeout=3.0)
+                logger.info('数据库连接已关闭')
+            except asyncio.TimeoutError:
+                logger.warning('关闭数据库连接超时，强制继续')
+            except Exception as e:
+                logger.error(f'关闭数据库连接失败: {e}')
 
     @staticmethod
     def calculate_hash(text: str) -> str:
