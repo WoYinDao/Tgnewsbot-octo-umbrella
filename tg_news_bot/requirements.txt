@@ -2,13 +2,13 @@
 python-dotenv==0.20.0
 telethon==1.28.5
 python-telegram-bot==13.12
-apscheduler==3.10.1
+apscheduler==3.6.3
 
 # Database
 aiosqlite==0.17.0
 
 # AI / OpenAI
-openai==0.27.8
+openai==0.10.5
 
 # Utilities
 pytz==2023.3
