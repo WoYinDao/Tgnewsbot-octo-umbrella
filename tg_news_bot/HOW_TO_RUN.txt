@@ -1,0 +1,32 @@
+========================================
+  如何运行配置工具
+========================================
+
+你现在在: /opt/Tgnewsbot-octo-umbrella/tg_news_bot
+工具文件在: /home/user/Tgnewsbot-octo-umbrella/tg_news_bot
+
+========================================
+  方法 1：直接使用绝对路径运行
+========================================
+
+配置向导:
+python3 /home/user/Tgnewsbot-octo-umbrella/tg_news_bot/setup_guide.py
+
+验证配置:
+python3 /home/user/Tgnewsbot-octo-umbrella/tg_news_bot/verify_config.py
+
+========================================
+  方法 2：在当前目录查看文件
+========================================
+
+ls -la
+
+然后运行:
+python3 setup_guide.py
+
+========================================
+  方法 3：切换到工具目录
+========================================
+
+cd /home/user/Tgnewsbot-octo-umbrella/tg_news_bot
+python3 setup_guide.py
