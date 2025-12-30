@@ -117,15 +117,18 @@ class Application:
             logger.error(f'获取统计信息失败: {e}')
 
 
-def setup_signal_handlers(app: Application):
+def setup_signal_handlers(app: Application, loop):
     """设置信号处理器"""
 
-    def signal_handler(signum, frame):
+    def signal_handler(signum):
         logger.info(f'收到信号 {signum}，准备退出...')
         app.running = False
+        # 立即停止事件循环以防止卡死
+        loop.call_soon_threadsafe(loop.stop)
 
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # 在 asyncio 事件循环中正确设置信号处理
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, lambda s=sig: signal_handler(s))
 
 
 async def main():
@@ -140,8 +143,9 @@ async def main():
     # 创建应用实例
     app = Application()
 
-    # 设置信号处理
-    setup_signal_handlers(app)
+    # 获取当前事件循环并设置信号处理
+    loop = asyncio.get_event_loop()
+    setup_signal_handlers(app, loop)
 
     # 启动应用
     try:
@@ -155,7 +159,8 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info('程序已退出')
+        print('\n程序已退出')
+        sys.exit(0)
     except Exception as e:
         logger.error(f'程序异常退出: {e}', exc_info=True)
         sys.exit(1)
