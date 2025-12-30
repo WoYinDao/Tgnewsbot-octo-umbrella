@@ -91,10 +91,13 @@ class TaskScheduler:
     def setup_jobs(self):
         """设置定时任务"""
 
+        # 获取 pytz 时区对象
+        tz = pytz.timezone(DAILY_REPORT_TIMEZONE)
+
         # 1. 采集 + 发布快讯任务（每 N 分钟执行一次）
         self.scheduler.add_job(
             self.collect_and_publish_task,
-            trigger=IntervalTrigger(minutes=FETCH_INTERVAL_MINUTES),
+            trigger=IntervalTrigger(minutes=FETCH_INTERVAL_MINUTES, timezone=tz),
             id='collect_and_publish',
             name='采集并发布快讯',
             replace_existing=True
@@ -103,7 +106,6 @@ class TaskScheduler:
 
         # 2. 日报任务（每天固定时间）
         hour, minute = map(int, DAILY_REPORT_TIME.split(':'))
-        tz = pytz.timezone(DAILY_REPORT_TIMEZONE)
         self.scheduler.add_job(
             self.publish_daily_report_task,
             trigger=CronTrigger(hour=hour, minute=minute, timezone=tz),
