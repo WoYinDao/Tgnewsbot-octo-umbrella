@@ -1,0 +1,161 @@
+"""
+主程序入口
+"""
+import asyncio
+import logging
+import signal
+import sys
+
+from config import setup_logging, validate_config
+from db import db
+from collector import collector
+from publisher import publisher
+from scheduler import scheduler
+
+logger = logging.getLogger(__name__)
+
+
+class Application:
+    """应用主类"""
+
+    def __init__(self):
+        self.running = False
+
+    async def init(self):
+        """初始化应用"""
+        logger.info('正在初始化应用...')
+
+        try:
+            # 验证配置
+            validate_config()
+
+            # 初始化数据库
+            await db.init_db()
+
+            # 初始化采集器
+            await collector.init_client()
+
+            # 初始化发布器
+            await publisher.init_bot()
+
+            logger.info('应用初始化完成')
+
+        except Exception as e:
+            logger.error(f'应用初始化失败: {e}', exc_info=True)
+            raise
+
+    async def start(self):
+        """启动应用"""
+        if self.running:
+            logger.warning('应用已在运行中')
+            return
+
+        try:
+            # 初始化
+            await self.init()
+
+            # 启动调度器
+            scheduler.start()
+
+            # 首次运行：立即执行一次采集和发布
+            logger.info('首次启动，执行一次完整流程...')
+            await scheduler.run_once()
+
+            self.running = True
+            logger.info('应用已启动，进入运行状态')
+
+            # 打印统计信息
+            await self.print_stats()
+
+            # 保持运行
+            while self.running:
+                await asyncio.sleep(1)
+
+        except KeyboardInterrupt:
+            logger.info('收到退出信号 (Ctrl+C)')
+            await self.stop()
+        except Exception as e:
+            logger.error(f'应用运行异常: {e}', exc_info=True)
+            await self.stop()
+
+    async def stop(self):
+        """停止应用"""
+        if not self.running:
+            return
+
+        logger.info('正在停止应用...')
+
+        try:
+            # 停止调度器
+            scheduler.stop()
+
+            # 关闭采集器
+            await collector.close()
+
+            # 关闭数据库
+            await db.close()
+
+            self.running = False
+            logger.info('应用已停止')
+
+        except Exception as e:
+            logger.error(f'停止应用时发生错误: {e}', exc_info=True)
+
+    async def print_stats(self):
+        """打印统计信息"""
+        try:
+            stats = await db.get_stats()
+            logger.info('=' * 50)
+            logger.info('数据库统计:')
+            logger.info(f'  总消息数: {stats["total"]}')
+            logger.info(f'  已发布数: {stats["published"]}')
+            logger.info('  分类统计:')
+            for category, count in stats['by_category'].items():
+                logger.info(f'    - {category}: {count}')
+            logger.info('=' * 50)
+        except Exception as e:
+            logger.error(f'获取统计信息失败: {e}')
+
+
+def setup_signal_handlers(app: Application):
+    """设置信号处理器"""
+
+    def signal_handler(signum, frame):
+        logger.info(f'收到信号 {signum}，准备退出...')
+        app.running = False
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+
+async def main():
+    """主函数"""
+    # 设置日志
+    setup_logging()
+
+    logger.info('=' * 60)
+    logger.info('Telegram 新闻播报机器人')
+    logger.info('=' * 60)
+
+    # 创建应用实例
+    app = Application()
+
+    # 设置信号处理
+    setup_signal_handlers(app)
+
+    # 启动应用
+    try:
+        await app.start()
+    except Exception as e:
+        logger.error(f'应用启动失败: {e}', exc_info=True)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info('程序已退出')
+    except Exception as e:
+        logger.error(f'程序异常退出: {e}', exc_info=True)
+        sys.exit(1)
