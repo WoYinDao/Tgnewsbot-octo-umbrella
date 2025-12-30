@@ -5,7 +5,7 @@ import re
 import json
 import logging
 from typing import Dict, Tuple
-from openai import AsyncOpenAI
+import openai
 from config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
 
 logger = logging.getLogger(__name__)
@@ -45,12 +45,12 @@ class Classifier:
     """消息分类器"""
 
     def __init__(self):
-        self.client = None
+        self.enabled = False
         if OPENAI_API_KEY:
-            self.client = AsyncOpenAI(
-                api_key=OPENAI_API_KEY,
-                base_url=OPENAI_BASE_URL
-            )
+            openai.api_key = OPENAI_API_KEY
+            if OPENAI_BASE_URL and OPENAI_BASE_URL != 'https://api.openai.com/v1':
+                openai.api_base = OPENAI_BASE_URL
+            self.enabled = True
             logger.info('AI 分类器已初始化')
         else:
             logger.warning('未配置 OPENAI_API_KEY，AI 分类功能将不可用')
@@ -97,7 +97,7 @@ class Classifier:
         Returns:
             {"category": str, "confidence": float, "summary": str}
         """
-        if not self.client:
+        if not self.enabled:
             logger.warning('AI 分类器未初始化，返回默认值')
             return {
                 'category': 'other',
@@ -119,7 +119,7 @@ class Classifier:
 请返回 JSON："""
 
         try:
-            response = await self.client.chat.completions.create(
+            response = await openai.ChatCompletion.acreate(
                 model=OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": "你是一个专业的新闻分类助手，擅长快速准确地分类新闻并生成摘要。"},
