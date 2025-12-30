@@ -1,7 +1,7 @@
 # Core Dependencies (Python 3.8 兼容版本)
 python-dotenv==0.20.0
 telethon==1.28.5
-python-telegram-bot==20.3
+python-telegram-bot==13.12
 apscheduler==3.10.1
 
 # Database

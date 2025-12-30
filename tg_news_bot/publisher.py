@@ -2,9 +2,9 @@
 发布模块 - 使用 Telegram Bot API 发布消息
 """
 import logging
-from telegram import Bot
+import asyncio
+from telegram import Bot, ParseMode
 from telegram.error import TelegramError
-from telegram.constants import ParseMode
 from config import TELEGRAM_BOT_TOKEN, TARGET_CHAT_ID, MESSAGE_MAX_LENGTH, AI_CONFIDENCE_THRESHOLD
 from db import db
 from templates import format_breaking_news, format_daily_report, truncate_message
@@ -22,7 +22,9 @@ class Publisher:
         """初始化 Bot"""
         try:
             self.bot = Bot(token=TELEGRAM_BOT_TOKEN)
-            bot_info = await self.bot.get_me()
+            # python-telegram-bot 13.x 是同步的，在线程池中运行（Python 3.8 兼容）
+            loop = asyncio.get_event_loop()
+            bot_info = await loop.run_in_executor(None, self.bot.get_me)
             logger.info(f'Bot 已初始化: @{bot_info.username}')
         except Exception as e:
             logger.error(f'Bot 初始化失败: {e}')
@@ -47,12 +49,16 @@ class Publisher:
             # 截断过长消息
             text = truncate_message(text, MESSAGE_MAX_LENGTH)
 
-            # 发送消息
-            await self.bot.send_message(
-                chat_id=TARGET_CHAT_ID,
-                text=text,
-                parse_mode=parse_mode,
-                disable_web_page_preview=False
+            # 发送消息（python-telegram-bot 13.x 是同步的，在线程池中运行）
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: self.bot.send_message(
+                    chat_id=TARGET_CHAT_ID,
+                    text=text,
+                    parse_mode=parse_mode,
+                    disable_web_page_preview=False
+                )
             )
             logger.info('消息已发送到目标频道')
             return True
@@ -98,7 +104,6 @@ class Publisher:
                         logger.info(f"快讯已发布: {msg['category']} - {msg['summary'][:50]}")
 
                         # 限速：避免触发 Telegram 限制
-                        import asyncio
                         await asyncio.sleep(1)
                     else:
                         logger.warning(f"快讯发布失败: {msg['id']}")
