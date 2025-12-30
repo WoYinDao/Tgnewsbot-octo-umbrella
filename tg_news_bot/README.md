@@ -52,6 +52,18 @@ pip install -r requirements.txt
 
 ### 3. 配置
 
+#### 快速配置（推荐）
+
+使用配置向导自动生成 `.env` 文件：
+
+```bash
+python3 setup_guide.py
+```
+
+按照提示输入配置信息，向导会自动生成 `.env` 文件。
+
+#### 手动配置
+
 #### 3.1 获取 Telethon API 凭证
 
 1. 访问 https://my.telegram.org/apps
@@ -125,7 +137,23 @@ TARGET_CHAT_ID=-1001234567890
 OPENAI_API_KEY=sk-your-openai-key
 ```
 
-### 4. 运行
+### 4. 验证配置
+
+在首次运行前，建议使用配置验证工具检查配置是否正确：
+
+```bash
+python3 verify_config.py
+```
+
+验证工具会检查：
+- Telethon API 配置
+- Bot Token 和连接
+- 目标频道访问权限
+- AI 配置（如果启用）
+
+如果验证失败，工具会提供详细的错误信息和解决方法。
+
+### 5. 运行
 
 #### 首次运行
 
@@ -262,7 +290,9 @@ sudo journalctl -u tg-news-bot -f
 1. 检查 `.env` 中的 `OPENAI_API_KEY` 是否正确
 2. 确认 API Key 有足够的额度
 3. 如果使用第三方 API，检查 `OPENAI_BASE_URL` 配置
-4. 查看日志文件 `logs/app.log` 获取详细错误信息
+4. **重要**：当前版本使用 `openai==0.10.5`，需要配置 `OPENAI_MODEL=text-davinci-003` 或其他 Completion API 支持的模型
+5. 如果 AI 分类失败，系统会自动回退到规则分类，不影响基本功能
+6. 查看日志文件 `logs/app.log` 获取详细错误信息
 
 ### Q6: 消息格式显示异常
 

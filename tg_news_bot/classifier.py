@@ -105,8 +105,8 @@ class Classifier:
                 'summary': text[:100] + ('...' if len(text) > 100 else '')
             }
 
-        # 构建 prompt
-        prompt = f"""请对以下新闻文本进行分类，并生成一句话摘要。
+        # 构建 prompt（适配 openai 0.10.5 的 Completion API）
+        prompt = f"""你是一个专业的新闻分类助手。请对以下新闻文本进行分类，并生成一句话摘要。
 
 分类必须是以下之一：politics（政治）、tech（科技）、game（游戏）、finance（财经）、society（社会）、other（其他）
 
@@ -116,20 +116,26 @@ class Classifier:
 新闻文本：
 {text[:1000]}
 
-请返回 JSON："""
+JSON返回："""
 
         try:
-            response = await openai.ChatCompletion.acreate(
-                model=OPENAI_MODEL,
-                messages=[
-                    {"role": "system", "content": "你是一个专业的新闻分类助手，擅长快速准确地分类新闻并生成摘要。"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=200
+            # openai 0.10.5 没有 ChatCompletion 和异步方法，使用 Completion + run_in_executor
+            import asyncio
+            loop = asyncio.get_event_loop()
+
+            # 使用旧式 Completion API
+            response = await loop.run_in_executor(
+                None,
+                lambda: openai.Completion.create(
+                    engine=OPENAI_MODEL if OPENAI_MODEL.startswith('text-') else 'text-davinci-003',
+                    prompt=prompt,
+                    temperature=0.3,
+                    max_tokens=200,
+                    stop=["\n\n"]
+                )
             )
 
-            content = response.choices[0].message.content.strip()
+            content = response.choices[0].text.strip()
             logger.debug(f'AI 返回: {content}')
 
             # 尝试解析 JSON
@@ -161,7 +167,7 @@ class Classifier:
         except json.JSONDecodeError as e:
             logger.error(f'AI 返回的内容不是有效 JSON: {e}')
         except Exception as e:
-            logger.error(f'AI 分类失败: {e}')
+            logger.error(f'AI 分类失败: {e}', exc_info=True)
 
         # 失败回退
         return {

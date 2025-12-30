@@ -64,7 +64,12 @@ class Publisher:
             return True
 
         except TelegramError as e:
-            logger.error(f'发送消息失败: {e}')
+            error_msg = str(e)
+            if 'Chat not found' in error_msg or 'chat not found' in error_msg.lower():
+                logger.error(f'发送消息失败: 找不到目标频道 (TARGET_CHAT_ID={TARGET_CHAT_ID})')
+                logger.error('请确认：1) TARGET_CHAT_ID 配置正确  2) Bot 已被添加到频道  3) Bot 有发送消息权限')
+            else:
+                logger.error(f'发送消息失败: {e}')
             return False
         except Exception as e:
             logger.error(f'发送消息时发生未知错误: {e}', exc_info=True)
