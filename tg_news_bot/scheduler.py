@@ -25,7 +25,9 @@ class TaskScheduler:
     """定时任务调度器"""
 
     def __init__(self):
-        self.scheduler = AsyncIOScheduler(timezone=DAILY_REPORT_TIMEZONE)
+        # APScheduler 3.6.3 需要 pytz 时区对象
+        tz = pytz.timezone(DAILY_REPORT_TIMEZONE)
+        self.scheduler = AsyncIOScheduler(timezone=tz)
         self.running = False
 
     async def collect_task(self):
@@ -101,9 +103,10 @@ class TaskScheduler:
 
         # 2. 日报任务（每天固定时间）
         hour, minute = map(int, DAILY_REPORT_TIME.split(':'))
+        tz = pytz.timezone(DAILY_REPORT_TIMEZONE)
         self.scheduler.add_job(
             self.publish_daily_report_task,
-            trigger=CronTrigger(hour=hour, minute=minute, timezone=DAILY_REPORT_TIMEZONE),
+            trigger=CronTrigger(hour=hour, minute=minute, timezone=tz),
             id='daily_report',
             name='发布日报',
             replace_existing=True
