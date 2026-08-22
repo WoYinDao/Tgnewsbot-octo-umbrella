@@ -3,6 +3,7 @@
 """
 import asyncio
 import logging
+import time
 import pytz
 from telethon import TelegramClient
 from telethon.errors import FloodWaitError, ChannelPrivateError, ChatAdminRequiredError
@@ -27,6 +28,10 @@ class Collector:
     def __init__(self):
         self.client = None
         self.session_file = BASE_DIR / f'{TELETHON_SESSION}.session'
+        # 频道实体缓存：get_entity 会消耗 Telegram API 配额，只在首次解析
+        self._entities = {}
+        # FloodWait 冷却表：channel -> 解禁时间（time.monotonic 时间戳）
+        self._flood_until = {}
 
     async def init_client(self):
         """初始化 Telethon 客户端"""
@@ -89,25 +94,32 @@ class Collector:
             采集到的新消息数量
         """
         try:
-            logger.info(f'开始采集频道: {channel}, 限制 {limit} 条')
+            # 获取频道实体（带缓存，避免每轮都消耗解析配额）
+            entity = self._entities.get(channel)
+            if entity is None:
+                try:
+                    entity = await self.client.get_entity(channel)
+                    self._entities[channel] = entity
+                except ValueError as e:
+                    logger.error(f'无法找到频道 {channel}: {e}')
+                    return 0
+                except ChannelPrivateError:
+                    logger.error(f'频道 {channel} 是私有的或未加入')
+                    return 0
 
-            # 获取频道实体
-            try:
-                entity = await self.client.get_entity(channel)
-            except ValueError as e:
-                logger.error(f'无法找到频道 {channel}: {e}')
-                return 0
-            except ChannelPrivateError:
-                logger.error(f'频道 {channel} 是私有的或未加入')
-                return 0
+            # 增量采集：只拉取上次进度之后的新消息
+            last_msg_id = await db.get_last_msg_id(channel)
+            logger.info(f'开始采集频道: {channel}（上次进度 msg_id={last_msg_id}，限制 {limit} 条）')
 
-            # 获取消息
+            # 获取消息（min_id 只返回 ID 大于该值的消息，首次运行 min_id=0 即拉最新 N 条）
             messages = []
-            async for message in self.client.iter_messages(entity, limit=limit):
+            max_seen_id = last_msg_id
+            async for message in self.client.iter_messages(entity, limit=limit, min_id=last_msg_id):
+                max_seen_id = max(max_seen_id, message.id)
                 if message.text:  # 只处理文本消息
                     messages.append(message)
 
-            logger.info(f'从 {channel} 获取到 {len(messages)} 条消息')
+            logger.info(f'从 {channel} 获取到 {len(messages)} 条新消息')
 
             # 处理消息
             report_tz = pytz.timezone(DAILY_REPORT_TIMEZONE)
@@ -121,7 +133,7 @@ class Collector:
                         logger.debug(f'跳过过短的消息: {msg.id}')
                         continue
 
-                    # 先查重，避免对已入库的旧消息重复调用 AI 分类（浪费费用）
+                    # 先查重（含跨频道内容查重），避免重复调用 AI 分类浪费费用
                     if await db.message_exists(channel, msg.id, text):
                         logger.debug(f'消息已存在，跳过: {channel}/{msg.id}')
                         continue
@@ -157,12 +169,18 @@ class Collector:
                     logger.error(f'处理消息 {msg.id} 失败: {e}', exc_info=True)
                     continue
 
+            # 保存采集进度（含被跳过的短消息/媒体消息，避免下轮重复拉取）
+            if max_seen_id > last_msg_id:
+                await db.set_last_msg_id(channel, max_seen_id)
+
             logger.info(f'频道 {channel} 采集完成，新增 {new_count} 条')
             return new_count
 
         except FloodWaitError as e:
-            logger.warning(f'触发频率限制，需等待 {e.seconds} 秒')
-            await asyncio.sleep(e.seconds)
+            # 不在原地等待（可能长达数小时，会卡死整轮采集）：
+            # 记录解禁时间，本轮跳过该频道，之后的轮次自动恢复
+            self._flood_until[channel] = time.monotonic() + e.seconds
+            logger.warning(f'频道 {channel} 触发频率限制，冷却 {e.seconds} 秒后自动恢复')
             return 0
         except ChatAdminRequiredError:
             logger.error(f'频道 {channel} 需要管理员权限')
@@ -180,6 +198,13 @@ class Collector:
         total_new = 0
 
         for channel in SOURCE_CHANNELS:
+            # 跳过仍在 FloodWait 冷却期的频道
+            flood_until = self._flood_until.get(channel, 0)
+            if flood_until > time.monotonic():
+                remaining = int(flood_until - time.monotonic())
+                logger.info(f'频道 {channel} 仍在限流冷却中（剩余 {remaining} 秒），本轮跳过')
+                continue
+
             try:
                 new_count = await self.fetch_channel_messages(channel)
                 total_new += new_count
