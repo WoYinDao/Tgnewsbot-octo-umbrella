@@ -35,9 +35,15 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TARGET_CHAT_ID = os.getenv('TARGET_CHAT_ID')  # 目标频道 ID（如 -1001234567890）
 
 # AI 分类配置
+# 后端一：Cursor SDK（优先，配置 CURSOR_API_KEY 后启用）
+CURSOR_API_KEY = os.getenv('CURSOR_API_KEY')
+CURSOR_MODEL = os.getenv('CURSOR_MODEL', 'composer-2.5')
+
+# 后端二：OpenAI 或任何 OpenAI 兼容 API
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 OPENAI_BASE_URL = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
-OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-3.5-turbo')
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
+
 AI_CONFIDENCE_THRESHOLD = float(os.getenv('AI_CONFIDENCE_THRESHOLD', '0.7'))
 
 # 分类配置

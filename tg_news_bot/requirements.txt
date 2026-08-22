@@ -1,15 +1,18 @@
-# Core Dependencies (Python 3.8 兼容版本)
-python-dotenv==0.20.0
-telethon==1.28.5
-python-telegram-bot==13.12
-apscheduler==3.6.3
+# Core Dependencies (需要 Python 3.9+)
+python-dotenv>=1.0
+telethon>=1.36
+python-telegram-bot>=21.0
+apscheduler>=3.10,<4
 
 # Database
-aiosqlite==0.17.0
+aiosqlite>=0.19
 
-# AI / OpenAI
-openai==0.10.5
+# AI 分类后端（二选一，也可以都装）
+# 方式一：Cursor SDK（使用 Cursor 订阅的模型，配置 CURSOR_API_KEY）
+cursor-sdk
+
+# 方式二：OpenAI 或任何 OpenAI 兼容 API（配置 OPENAI_API_KEY / OPENAI_BASE_URL）
+openai>=1.0
 
 # Utilities
-pytz==2023.3
-cryptography==38.0.4
+pytz>=2024.1

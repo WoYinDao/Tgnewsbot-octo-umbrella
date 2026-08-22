@@ -1,12 +1,24 @@
 """
 分类模块 - 规则 + AI 对消息进行分类
+
+AI 后端（按优先级）：
+1. Cursor SDK（配置 CURSOR_API_KEY 后启用，使用 Cursor 订阅的模型）
+2. OpenAI 或任何 OpenAI 兼容 API（配置 OPENAI_API_KEY）
+两者都未配置时只使用规则分类。
 """
 import re
 import json
 import logging
-from typing import Dict, Tuple
-import openai
-from config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
+from typing import Dict, Optional, Tuple
+
+from config import (
+    BASE_DIR,
+    CURSOR_API_KEY,
+    CURSOR_MODEL,
+    OPENAI_API_KEY,
+    OPENAI_BASE_URL,
+    OPENAI_MODEL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,20 +52,66 @@ RULE_KEYWORDS = {
     ]
 }
 
+VALID_CATEGORIES = ['politics', 'tech', 'game', 'finance', 'society', 'other']
+
+CLASSIFY_PROMPT = """你是一个专业的新闻分类助手。请对以下新闻文本进行分类，并生成一句话摘要。
+
+分类必须是以下之一：politics（政治）、tech（科技）、game（游戏）、finance（财经）、society（社会）、other（其他）
+
+请严格按照以下 JSON 格式返回（不要添加任何其他文字）：
+{{"category": "分类", "confidence": 0.85, "summary": "一句话摘要"}}
+
+新闻文本：
+{text}"""
+
+
+def _compile_keyword_pattern(keyword: str):
+    """英文/数字关键词用词边界匹配，避免 'AI' 误匹配 said/email 等；中文关键词用子串匹配"""
+    if re.fullmatch(r'[A-Za-z0-9]+', keyword):
+        return re.compile(r'\b' + re.escape(keyword) + r'\b', re.IGNORECASE)
+    return None
+
+
+# 预编译英文关键词的词边界正则
+_KEYWORD_PATTERNS = {
+    category: [(kw, _compile_keyword_pattern(kw)) for kw in keywords]
+    for category, keywords in RULE_KEYWORDS.items()
+}
+
+
+def _extract_json(content: str) -> Dict:
+    """从模型回复中提取 JSON（容忍代码块标记和前后缀文字）"""
+    content = re.sub(r'```(?:json)?\s*|\s*```', '', content).strip()
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        # 回复中夹杂了其他文字时，取第一个 {...} 块
+        match = re.search(r'\{.*\}', content, re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+        raise
+
 
 class Classifier:
     """消息分类器"""
 
     def __init__(self):
-        self.enabled = False
-        if OPENAI_API_KEY:
-            openai.api_key = OPENAI_API_KEY
-            if OPENAI_BASE_URL and OPENAI_BASE_URL != 'https://api.openai.com/v1':
-                openai.api_base = OPENAI_BASE_URL
-            self.enabled = True
-            logger.info('AI 分类器已初始化')
+        self._cursor_client = None
+        self._openai_client = None
+
+        if CURSOR_API_KEY:
+            self.backend = 'cursor'
+            logger.info(f'AI 分类后端: Cursor SDK (模型: {CURSOR_MODEL})')
+        elif OPENAI_API_KEY:
+            self.backend = 'openai'
+            logger.info(f'AI 分类后端: OpenAI 兼容 API (模型: {OPENAI_MODEL})')
         else:
-            logger.warning('未配置 OPENAI_API_KEY，AI 分类功能将不可用')
+            self.backend = None
+            logger.warning('未配置 CURSOR_API_KEY 或 OPENAI_API_KEY，AI 分类不可用，将只使用规则分类')
+
+    @property
+    def enabled(self) -> bool:
+        return self.backend is not None
 
     def rule_classify(self, text: str) -> Tuple[str, float]:
         """
@@ -62,20 +120,19 @@ class Classifier:
         Returns:
             (category, confidence) 元组
         """
-        text_lower = text.lower()
         scores = {category: 0 for category in RULE_KEYWORDS.keys()}
 
-        # 计算每个分类的关键词匹配分数
-        for category, keywords in RULE_KEYWORDS.items():
-            for keyword in keywords:
-                if keyword.lower() in text_lower:
+        for category, patterns in _KEYWORD_PATTERNS.items():
+            for keyword, pattern in patterns:
+                if pattern is not None:
+                    if pattern.search(text):
+                        scores[category] += 1
+                elif keyword in text:
                     scores[category] += 1
 
-        # 找出最高分的分类
         max_score = max(scores.values())
 
         if max_score == 0:
-            # 没有匹配任何关键词
             return 'other', 0.0
 
         max_category = max(scores.items(), key=lambda x: x[1])[0]
@@ -84,11 +141,49 @@ class Classifier:
         total_score = sum(scores.values())
         confidence = scores[max_category] / total_score if total_score > 0 else 0
 
-        # 如果置信度太低，标记为不确定
         if confidence < 0.5:
             return 'other', confidence
 
         return max_category, confidence
+
+    async def _ai_call_cursor(self, prompt: str) -> str:
+        """通过 Cursor SDK 调用模型，返回文本回复"""
+        from cursor_sdk import AsyncClient, LocalAgentOptions
+
+        if self._cursor_client is None:
+            self._cursor_client = await AsyncClient.launch_bridge(workspace=str(BASE_DIR))
+
+        # 每次分类创建独立 agent（tools=[] 表示纯文本回答，不给任何工具），
+        # 避免复用同一 agent 导致上下文越积越长、费用上涨
+        agent = await self._cursor_client.agents.create(
+            model=CURSOR_MODEL,
+            api_key=CURSOR_API_KEY,
+            tools=[],
+            local=LocalAgentOptions(cwd=str(BASE_DIR)),
+        )
+        try:
+            run = await agent.send(prompt)
+            return await run.text()
+        finally:
+            await agent.close()
+
+    async def _ai_call_openai(self, prompt: str) -> str:
+        """通过 OpenAI 兼容 API 调用模型，返回文本回复"""
+        from openai import AsyncOpenAI
+
+        if self._openai_client is None:
+            self._openai_client = AsyncOpenAI(
+                api_key=OPENAI_API_KEY,
+                base_url=OPENAI_BASE_URL,
+            )
+
+        response = await self._openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[{'role': 'user', 'content': prompt}],
+            temperature=0.3,
+            max_tokens=300,
+        )
+        return response.choices[0].message.content or ''
 
     async def ai_classify(self, text: str) -> Dict:
         """
@@ -97,69 +192,36 @@ class Classifier:
         Returns:
             {"category": str, "confidence": float, "summary": str}
         """
+        fallback = {
+            'category': 'other',
+            'confidence': 0.0,
+            'summary': text[:100] + ('...' if len(text) > 100 else '')
+        }
+
         if not self.enabled:
             logger.warning('AI 分类器未初始化，返回默认值')
-            return {
-                'category': 'other',
-                'confidence': 0.0,
-                'summary': text[:100] + ('...' if len(text) > 100 else '')
-            }
+            return fallback
 
-        # 构建 prompt（适配 openai 0.10.5 的 Completion API）
-        prompt = f"""你是一个专业的新闻分类助手。请对以下新闻文本进行分类，并生成一句话摘要。
-
-分类必须是以下之一：politics（政治）、tech（科技）、game（游戏）、finance（财经）、society（社会）、other（其他）
-
-请严格按照以下 JSON 格式返回（不要添加任何其他文字）：
-{{"category": "分类", "confidence": 0.85, "summary": "一句话摘要"}}
-
-新闻文本：
-{text[:1000]}
-
-JSON返回："""
+        prompt = CLASSIFY_PROMPT.format(text=text[:1000])
 
         try:
-            # openai 0.10.5 没有 ChatCompletion 和异步方法，使用 Completion + run_in_executor
-            import asyncio
-            loop = asyncio.get_event_loop()
+            if self.backend == 'cursor':
+                content = await self._ai_call_cursor(prompt)
+            else:
+                content = await self._ai_call_openai(prompt)
 
-            # 使用旧式 Completion API
-            response = await loop.run_in_executor(
-                None,
-                lambda: openai.Completion.create(
-                    engine=OPENAI_MODEL if OPENAI_MODEL.startswith('text-') else 'text-davinci-003',
-                    prompt=prompt,
-                    temperature=0.3,
-                    max_tokens=200,
-                    stop=["\n\n"]
-                )
-            )
-
-            content = response.choices[0].text.strip()
             logger.debug(f'AI 返回: {content}')
+            result = _extract_json(content)
 
-            # 尝试解析 JSON
-            # 去除可能的 markdown 代码块标记
-            content = re.sub(r'```json\s*|\s*```', '', content)
-
-            result = json.loads(content)
-
-            # 验证字段
             if 'category' not in result or 'summary' not in result:
                 raise ValueError('返回的 JSON 缺少必要字段')
 
-            # 验证分类
-            valid_categories = ['politics', 'tech', 'game', 'finance', 'society', 'other']
-            if result['category'] not in valid_categories:
+            if result['category'] not in VALID_CATEGORIES:
                 logger.warning(f"无效的分类: {result['category']}，使用默认值 'other'")
                 result['category'] = 'other'
 
-            # 确保 confidence 字段存在
-            if 'confidence' not in result:
-                result['confidence'] = 0.5
-
-            # 确保 confidence 在 0-1 之间
-            result['confidence'] = max(0.0, min(1.0, float(result['confidence'])))
+            result['confidence'] = max(0.0, min(1.0, float(result.get('confidence', 0.5))))
+            result['summary'] = str(result['summary'])
 
             logger.info(f"AI 分类成功: {result['category']} (confidence: {result['confidence']:.2f})")
             return result
@@ -169,12 +231,7 @@ JSON返回："""
         except Exception as e:
             logger.error(f'AI 分类失败: {e}', exc_info=True)
 
-        # 失败回退
-        return {
-            'category': 'other',
-            'confidence': 0.0,
-            'summary': text[:100] + ('...' if len(text) > 100 else '')
-        }
+        return fallback
 
     async def classify(self, text: str) -> Dict:
         """
@@ -183,7 +240,6 @@ JSON返回："""
         Returns:
             {"category": str, "confidence": float, "summary": str}
         """
-        # 文本清洗
         text = text.strip()
 
         if not text:
@@ -219,6 +275,22 @@ JSON返回："""
             }
 
         return ai_result
+
+    async def close(self):
+        """释放 AI 客户端资源"""
+        if self._cursor_client is not None:
+            try:
+                await self._cursor_client.aclose()
+            except Exception as e:
+                logger.warning(f'关闭 Cursor 客户端失败: {e}')
+            self._cursor_client = None
+
+        if self._openai_client is not None:
+            try:
+                await self._openai_client.close()
+            except Exception as e:
+                logger.warning(f'关闭 OpenAI 客户端失败: {e}')
+            self._openai_client = None
 
 
 # 全局分类器实例

@@ -3,17 +3,17 @@
 """
 import asyncio
 import logging
-from datetime import datetime
+import pytz
 from telethon import TelegramClient
 from telethon.errors import FloodWaitError, ChannelPrivateError, ChatAdminRequiredError
-from telethon.tl.types import MessageMediaWebPage
 from config import (
     TELETHON_API_ID,
     TELETHON_API_HASH,
     TELETHON_SESSION,
     SOURCE_CHANNELS,
     FETCH_LIMIT,
-    BASE_DIR
+    BASE_DIR,
+    DAILY_REPORT_TIMEZONE
 )
 from db import db
 from classifier import classifier
@@ -110,6 +110,7 @@ class Collector:
             logger.info(f'从 {channel} 获取到 {len(messages)} 条消息')
 
             # 处理消息
+            report_tz = pytz.timezone(DAILY_REPORT_TIMEZONE)
             new_count = 0
             for msg in messages:
                 try:
@@ -120,14 +121,22 @@ class Collector:
                         logger.debug(f'跳过过短的消息: {msg.id}')
                         continue
 
+                    # 先查重，避免对已入库的旧消息重复调用 AI 分类（浪费费用）
+                    if await db.message_exists(channel, msg.id, text):
+                        logger.debug(f'消息已存在，跳过: {channel}/{msg.id}')
+                        continue
+
                     # 使用分类器
                     classification = await classifier.classify(text)
+
+                    # 消息时间转换为日报时区存储，保证日报按本地日期聚合正确
+                    local_date = msg.date.astimezone(report_tz)
 
                     # 插入数据库
                     msg_id = await db.insert_message(
                         source=channel,
                         msg_id=msg.id,
-                        date=msg.date,
+                        date=local_date,
                         text=text,
                         category=classification['category'],
                         confidence=classification['confidence'],
@@ -141,7 +150,7 @@ class Collector:
                             f'{classification["category"]} ({classification["confidence"]:.2f})'
                         )
 
-                    # 限速：每条消息间隔 0.5 秒
+                    # 限速：只对真正处理的新消息间隔 0.5 秒
                     await asyncio.sleep(0.5)
 
                 except Exception as e:
