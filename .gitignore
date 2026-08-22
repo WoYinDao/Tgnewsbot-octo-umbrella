@@ -1,0 +1,16 @@
+# 敏感信息 - 绝对不要提交
+.env
+*.session
+*.session-journal
+
+# 运行时数据
+news.db
+news.db-journal
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
