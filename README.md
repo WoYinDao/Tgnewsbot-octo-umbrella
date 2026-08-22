@@ -10,7 +10,7 @@
 [![Telethon](https://img.shields.io/badge/Telethon-1.36%2B-2CA5E0?logo=telegram&logoColor=white)](https://github.com/LonamiWebs/Telethon)
 [![python-telegram-bot](https://img.shields.io/badge/PTB-21%2B-2CA5E0?logo=telegram&logoColor=white)](https://python-telegram-bot.org/)
 [![AI](https://img.shields.io/badge/AI-Cursor%20SDK%20%7C%20OpenAI-8A2BE2)](https://cursor.com/dashboard/api)
-[![License](https://img.shields.io/badge/License-仅供学习%E4%B8%AA人使用-lightgrey)](#-使用声明)
+[![License](https://img.shields.io/badge/License-仅供学习个人使用-lightgrey)](#-使用声明)
 
 </div>
 
@@ -35,37 +35,48 @@
 
 ```mermaid
 flowchart TD
-    subgraph S1["📡 ① 采集阶段 · 每 10 分钟一轮"]
-        A([从源频道拉取最新消息]) --> B{这条消息<br/>之前处理过吗？}
-        B -->|处理过| SKIP([跳过，不重复处理])
-        B -->|新消息| C([进入分类])
+    subgraph S1["① 采集阶段（每 10 分钟一轮）"]
+        A["📡 从源频道拉取最新消息"]
+        B{"这条消息之前处理过吗？"}
+        SKIP["跳过，不重复处理"]
     end
 
-    subgraph S2["🤖 ② 分类阶段"]
-        C --> D{关键词规则分类<br/>能确定类别吗？}
-        D -->|能，置信度 ≥ 0.7| F[(存入数据库)]
-        D -->|拿不准| E([AI 分类 + 生成摘要<br/>Cursor SDK 或 OpenAI])
-        E --> F
+    subgraph S2["② 分类阶段"]
+        D{"关键词规则分类能确定类别吗？"}
+        E["🤖 AI 分类 + 生成摘要<br/>Cursor SDK 或 OpenAI"]
+        F[("存入数据库")]
     end
 
-    subgraph S3["🚀 ③ 发布阶段"]
-        F --> G{置信度 ≥ 0.7？}
-        G -->|是| H([⚡ 立即推送快讯])
-        G -->|否| I([留在库里，不发快讯])
-        F -.每天 21:00.-> J([📰 汇总当天消息<br/>按分类生成日报])
-        H --> K([🎯 目标频道])
-        J --> K
+    subgraph S3["③ 发布阶段"]
+        G{"置信度 ≥ 0.7 ？"}
+        H["⚡ 立即推送快讯"]
+        I["留在库里，不发快讯"]
+        J["📰 汇总当天消息<br/>按分类生成日报"]
+        K["🎯 目标频道"]
     end
+
+    A --> B
+    B -->|"处理过"| SKIP
+    B -->|"新消息"| D
+    D -->|"能，置信度达标"| F
+    D -->|"拿不准"| E
+    E --> F
+    F --> G
+    G -->|"是"| H
+    G -->|"否"| I
+    F -.->|"每天 21:00"| J
+    H --> K
+    J --> K
 
     classDef collect fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#0D47A1
-    classDef decision fill:#FFFDE7,stroke:#F9A825,stroke-width:2px,color:#795548
+    classDef decision fill:#FFF9C4,stroke:#F9A825,stroke-width:2px,color:#5D4037
     classDef ai fill:#F3E5F5,stroke:#8E24AA,stroke-width:2px,color:#4A148C
-    classDef db fill:#FFF3E0,stroke:#FB8C00,stroke-width:2px,color:#E65100
-    classDef pub fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#1B5E20
+    classDef db fill:#FFE0B2,stroke:#FB8C00,stroke-width:2px,color:#E65100
+    classDef pub fill:#C8E6C9,stroke:#43A047,stroke-width:2px,color:#1B5E20
     classDef muted fill:#ECEFF1,stroke:#90A4AE,stroke-width:1px,color:#546E7A
     classDef target fill:#1E88E5,stroke:#0D47A1,stroke-width:2px,color:#FFFFFF
 
-    class A,C collect
+    class A collect
     class B,D,G decision
     class E ai
     class F db
@@ -73,9 +84,9 @@ flowchart TD
     class SKIP,I muted
     class K target
 
-    style S1 fill:#F5FAFF,stroke:#90CAF9,stroke-width:1px
-    style S2 fill:#FBF5FD,stroke:#CE93D8,stroke-width:1px
-    style S3 fill:#F4FBF5,stroke:#A5D6A7,stroke-width:1px
+    style S1 fill:#F5FAFF,stroke:#90CAF9,stroke-width:1px,color:#1565C0
+    style S2 fill:#FBF5FD,stroke:#CE93D8,stroke-width:1px,color:#7B1FA2
+    style S3 fill:#F4FBF5,stroke:#A5D6A7,stroke-width:1px,color:#2E7D32
 ```
 
 用文字说就是这五步：
