@@ -9,6 +9,7 @@ import sys
 from config import setup_logging, validate_config
 from db import db
 from collector import collector
+from classifier import classifier
 from publisher import publisher
 from scheduler import scheduler
 
@@ -20,6 +21,7 @@ class Application:
 
     def __init__(self):
         self.running = False
+        self._stop_event = asyncio.Event()
 
     async def init(self):
         """初始化应用"""
@@ -67,9 +69,8 @@ class Application:
             # 打印统计信息
             await self.print_stats()
 
-            # 保持运行（使用短间隔以便快速响应退出信号）
-            while self.running:
-                await asyncio.sleep(0.1)
+            # 保持运行，直到收到退出信号
+            await self._stop_event.wait()
 
         except KeyboardInterrupt:
             logger.info('收到退出信号 (Ctrl+C)')
@@ -86,6 +87,7 @@ class Application:
 
         self._stopping = True
         self.running = False
+        self._stop_event.set()
 
         logger.info('正在停止应用...')
 
@@ -96,6 +98,12 @@ class Application:
             # 关闭采集器
             await collector.close()
 
+            # 关闭发布器
+            await publisher.close()
+
+            # 关闭分类器（释放 AI 客户端）
+            await classifier.close()
+
             # 关闭数据库
             await db.close()
 
@@ -103,8 +111,6 @@ class Application:
 
         except Exception as e:
             logger.error(f'停止应用时发生错误: {e}', exc_info=True)
-        finally:
-            self._stopping = False
 
     async def print_stats(self):
         """打印统计信息"""
@@ -160,7 +166,7 @@ async def main():
     app = Application()
 
     # 获取当前事件循环并设置信号处理
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     setup_signal_handlers(app, loop)
 
     # 启动应用

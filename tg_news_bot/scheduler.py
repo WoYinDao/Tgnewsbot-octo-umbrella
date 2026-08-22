@@ -25,7 +25,6 @@ class TaskScheduler:
     """定时任务调度器"""
 
     def __init__(self):
-        # APScheduler 3.6.3 需要 pytz 时区对象
         tz = pytz.timezone(DAILY_REPORT_TIMEZONE)
         self.scheduler = AsyncIOScheduler(timezone=tz)
         self.running = False
@@ -53,19 +52,19 @@ class TaskScheduler:
         try:
             logger.info('===== 开始生成并发布日报 =====')
 
-            # 获取昨天的日期
+            # 日报在每天固定时间（如 21:00）发布当天的新闻
             now = datetime.now(pytz.timezone(DAILY_REPORT_TIMEZONE))
-            yesterday = now.date().isoformat()
+            today = now.date().isoformat()
 
             success = await publisher.publish_daily_report(
-                date=yesterday,
+                date=today,
                 top_n=DAILY_REPORT_TOP_N
             )
 
             if success:
-                logger.info(f'===== 日报发布成功: {yesterday} =====')
+                logger.info(f'===== 日报发布成功: {today} =====')
             else:
-                logger.warning(f'===== 日报发布失败: {yesterday} =====')
+                logger.warning(f'===== 日报发布失败: {today} =====')
 
         except Exception as e:
             logger.error(f'日报发布任务执行失败: {e}', exc_info=True)

@@ -1,15 +1,24 @@
 """
-发布模块 - 使用 Telegram Bot API 发布消息
+发布模块 - 使用 Telegram Bot API 发布消息（python-telegram-bot 21+，原生 async）
 """
 import logging
 import asyncio
-from telegram import Bot, ParseMode
-from telegram.error import TelegramError
+import re
+
+from telegram import Bot
+from telegram.constants import ParseMode
+from telegram.error import BadRequest, TelegramError
+
 from config import TELEGRAM_BOT_TOKEN, TARGET_CHAT_ID, MESSAGE_MAX_LENGTH, AI_CONFIDENCE_THRESHOLD
 from db import db
 from templates import format_breaking_news, format_daily_report, truncate_message
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_html(text: str) -> str:
+    """去掉 HTML 标签，用于解析失败时的纯文本降级发送"""
+    return re.sub(r'<[^>]+>', '', text)
 
 
 class Publisher:
@@ -22,21 +31,31 @@ class Publisher:
         """初始化 Bot"""
         try:
             self.bot = Bot(token=TELEGRAM_BOT_TOKEN)
-            # python-telegram-bot 13.x 是同步的，在线程池中运行（Python 3.8 兼容）
-            loop = asyncio.get_event_loop()
-            bot_info = await loop.run_in_executor(None, self.bot.get_me)
+            await self.bot.initialize()
+            bot_info = await self.bot.get_me()
             logger.info(f'Bot 已初始化: @{bot_info.username}')
         except Exception as e:
             logger.error(f'Bot 初始化失败: {e}')
             raise
 
-    async def send_message(self, text: str, parse_mode: str = ParseMode.MARKDOWN) -> bool:
+    async def close(self):
+        """关闭 Bot"""
+        if self.bot:
+            try:
+                await asyncio.wait_for(self.bot.shutdown(), timeout=5.0)
+                logger.info('Bot 已关闭')
+            except asyncio.TimeoutError:
+                logger.warning('关闭 Bot 超时，强制继续')
+            except Exception as e:
+                logger.error(f'关闭 Bot 失败: {e}')
+
+    async def send_message(self, text: str, parse_mode: str = ParseMode.HTML) -> bool:
         """
         发送消息到目标频道
 
         Args:
-            text: 消息内容
-            parse_mode: 解析模式（Markdown/HTML）
+            text: 消息内容（HTML 格式）
+            parse_mode: 解析模式
 
         Returns:
             是否发送成功
@@ -45,34 +64,46 @@ class Publisher:
             logger.error('Bot 未初始化')
             return False
 
-        try:
-            # 截断过长消息
-            text = truncate_message(text, MESSAGE_MAX_LENGTH)
+        # 截断过长消息
+        text = truncate_message(text, MESSAGE_MAX_LENGTH)
 
-            # 发送消息（python-telegram-bot 13.x 是同步的，在线程池中运行）
-            # 添加超时防止卡死
-            loop = asyncio.get_event_loop()
+        try:
             await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    lambda: self.bot.send_message(
-                        chat_id=TARGET_CHAT_ID,
-                        text=text,
-                        parse_mode=parse_mode,
-                        disable_web_page_preview=False
-                    )
+                self.bot.send_message(
+                    chat_id=TARGET_CHAT_ID,
+                    text=text,
+                    parse_mode=parse_mode,
                 ),
-                timeout=10.0  # 10 秒超时
+                timeout=15.0
             )
             logger.info('消息已发送到目标频道')
             return True
 
         except asyncio.TimeoutError:
-            logger.error('发送消息超时 (10秒)')
+            logger.error('发送消息超时 (15秒)')
+            return False
+        except BadRequest as e:
+            if 'parse' in str(e).lower() or 'entit' in str(e).lower():
+                # HTML 解析失败（如截断破坏了标签），降级为纯文本重发
+                logger.warning(f'HTML 解析失败，降级为纯文本发送: {e}')
+                try:
+                    await asyncio.wait_for(
+                        self.bot.send_message(
+                            chat_id=TARGET_CHAT_ID,
+                            text=_strip_html(text),
+                        ),
+                        timeout=15.0
+                    )
+                    logger.info('消息已以纯文本发送')
+                    return True
+                except Exception as e2:
+                    logger.error(f'纯文本降级发送也失败: {e2}')
+                    return False
+            logger.error(f'发送消息失败 (BadRequest): {e}')
             return False
         except TelegramError as e:
             error_msg = str(e)
-            if 'Chat not found' in error_msg or 'chat not found' in error_msg.lower():
+            if 'chat not found' in error_msg.lower():
                 logger.error(f'发送消息失败: 找不到目标频道 (TARGET_CHAT_ID={TARGET_CHAT_ID})')
                 logger.error('请确认：1) TARGET_CHAT_ID 配置正确  2) Bot 已被添加到频道  3) Bot 有发送消息权限')
             else:

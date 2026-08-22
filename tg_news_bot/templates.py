@@ -1,6 +1,10 @@
 """
 模板模块 - 日报/快讯排版模板
+
+使用 Telegram HTML 解析模式。所有动态内容（正文、摘要）都经过
+html.escape 转义，避免消息中的特殊字符导致 Telegram 解析失败。
 """
+import html
 from datetime import datetime
 from typing import Dict, List
 
@@ -16,6 +20,16 @@ CATEGORY_NAMES = {
 }
 
 
+def _build_link(source: str, msg_id) -> str:
+    """构建消息原文链接，私有频道（-100 开头）无法构造链接"""
+    if not msg_id or not source:
+        return ''
+    source_clean = source.lstrip('@')
+    if source_clean.startswith('-100') or source_clean.lstrip('-').isdigit():
+        return ''
+    return f'https://t.me/{source_clean}/{msg_id}'
+
+
 def format_breaking_news(message: Dict) -> str:
     """
     格式化快讯消息
@@ -24,45 +38,37 @@ def format_breaking_news(message: Dict) -> str:
         message: 消息字典，包含 category, summary, text, source, msg_id 等字段
 
     Returns:
-        格式化后的 Markdown 文本
+        格式化后的 HTML 文本
     """
     category_name = CATEGORY_NAMES.get(message['category'], '未分类')
     confidence = message.get('confidence', 0)
-    summary = message.get('summary', '').strip()
+    summary = html.escape(message.get('summary', '').strip())
     text = message.get('text', '').strip()
-    source = message.get('source', '')
-    msg_id = message.get('msg_id')
+    text = html.escape(text[:500] + ('...' if len(text) > 500 else ''))
+    link = _build_link(message.get('source', ''), message.get('msg_id'))
 
-    # 构建消息链接（如果有 msg_id）
-    link = ''
-    if msg_id and source:
-        # 移除 @ 符号（如果有）
-        source_clean = source.lstrip('@')
-        if source_clean.startswith('-100'):
-            # 私有频道 ID，无法直接构造链接
-            link = ''
-        else:
-            # 公开频道可以构造链接
-            link = f'https://t.me/{source_clean}/{msg_id}'
-
-    # 格式化
     lines = [
-        f'🔔 **快讯 - {category_name}**',
+        f'\U0001f514 <b>快讯 - {category_name}</b>',
         '',
-        f'**摘要：** {summary}' if summary else '',
-        '',
+    ]
+
+    if summary:
+        lines.append(f'<b>摘要：</b> {summary}')
+        lines.append('')
+
+    lines.extend([
         f'置信度：{confidence:.2f}',
         '',
-        '---',
+        '—————',
         '',
-        text[:500] + ('...' if len(text) > 500 else ''),  # 限制长度
-    ]
+        text,
+    ])
 
     if link:
         lines.append('')
-        lines.append(f'[查看原文]({link})')
+        lines.append(f'<a href="{link}">查看原文</a>')
 
-    return '\n'.join([line for line in lines if line is not None])
+    return '\n'.join(lines)
 
 
 def format_daily_report(date: str, data: Dict[str, List[Dict]]) -> str:
@@ -74,20 +80,20 @@ def format_daily_report(date: str, data: Dict[str, List[Dict]]) -> str:
         data: 按分类聚合的消息字典
 
     Returns:
-        格式化后的 Markdown 文本
+        格式化后的 HTML 文本
     """
     lines = [
-        f'📰 **每日新闻日报 - {date}**',
+        f'\U0001f4f0 <b>每日新闻日报 - {date}</b>',
         '',
         f'生成时间：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
         '',
-        '=' * 40,
+        '=' * 30,
         ''
     ]
 
     # 统计
     total_count = sum(len(messages) for messages in data.values())
-    lines.append(f'今日共收录 **{total_count}** 条新闻')
+    lines.append(f'今日共收录 <b>{total_count}</b> 条新闻')
     lines.append('')
 
     # 按分类输出
@@ -99,35 +105,28 @@ def format_daily_report(date: str, data: Dict[str, List[Dict]]) -> str:
         category_name = CATEGORY_NAMES[category]
 
         lines.append('')
-        lines.append(f'## 📌 {category_name} ({len(messages)} 条)')
+        lines.append(f'\U0001f4cc <b>{category_name}</b> ({len(messages)} 条)')
         lines.append('')
 
         for idx, msg in enumerate(messages, 1):
-            summary = msg.get('summary', '').strip()
-            text = msg.get('text', '').strip()
+            summary = html.escape(msg.get('summary', '').strip())
+            text = html.escape(msg.get('text', '').strip()[:50])
             confidence = msg.get('confidence', 0)
-            source = msg.get('source', '')
-            msg_id = msg.get('msg_id')
+            link = _build_link(msg.get('source', ''), msg.get('msg_id'))
 
-            # 构建链接
-            link = ''
-            if msg_id and source:
-                source_clean = source.lstrip('@')
-                if not source_clean.startswith('-100'):
-                    link = f'https://t.me/{source_clean}/{msg_id}'
-
-            lines.append(f'**{idx}. {summary}**' if summary else f'**{idx}. {text[:50]}...**')
+            title = summary if summary else f'{text}...'
+            lines.append(f'<b>{idx}. {title}</b>')
             lines.append(f'   置信度：{confidence:.2f}')
 
             if link:
-                lines.append(f'   [原文链接]({link})')
+                lines.append(f'   <a href="{link}">原文链接</a>')
 
             lines.append('')
 
     lines.append('')
-    lines.append('=' * 40)
+    lines.append('=' * 30)
     lines.append('')
-    lines.append('_本日报由 AI 自动生成_')
+    lines.append('<i>本日报由 AI 自动生成</i>')
 
     return '\n'.join(lines)
 
