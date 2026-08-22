@@ -31,7 +31,7 @@ def get_input(prompt, default='', required=True):
         if not value and default:
             return default
         if not value and required:
-            print("❌ 这是必填项，请输入！")
+            print("\u274c 这是必填项，请输入！")
             continue
         return value
 
@@ -42,7 +42,7 @@ def main():
     env_file = Path(__file__).parent / '.env'
 
     if env_file.exists():
-        print(f"⚠️  检测到已存在的 .env 文件")
+        print(f"\u26a0\ufe0f  检测到已存在的 .env 文件")
         overwrite = input("是否覆盖？(y/N): ").strip().lower()
         if overwrite != 'y':
             print("已取消配置")
@@ -78,19 +78,30 @@ def main():
 
     # 4. AI 配置
     print_step(4, "AI 配置（可选）")
+    print("支持两种 AI 后端：")
+    print("  1) Cursor SDK - 使用 Cursor 订阅的模型（https://cursor.com/dashboard/api 获取 Key）")
+    print("  2) OpenAI 兼容 API - OpenAI / DeepSeek / OpenRouter / Ollama 等")
     use_ai = input("是否使用 AI 分类？(Y/n): ").strip().lower()
     if use_ai != 'n':
-        config['OPENAI_API_KEY'] = get_input("OpenAI API Key", required=False)
-        if config.get('OPENAI_API_KEY'):
-            config['OPENAI_BASE_URL'] = get_input("API Base URL",
-                                                   default='https://api.openai.com/v1',
-                                                   required=False)
-            config['OPENAI_MODEL'] = get_input("模型名称",
-                                                default='text-davinci-003',
-                                                required=False)
-            config['AI_CONFIDENCE_THRESHOLD'] = get_input("置信度阈值 (0-1)",
-                                                           default='0.7',
-                                                           required=False)
+        backend = get_input("选择后端 (1=Cursor, 2=OpenAI 兼容)", default='1', required=False)
+        if backend == '1':
+            config['CURSOR_API_KEY'] = get_input("Cursor API Key", required=False)
+            if config.get('CURSOR_API_KEY'):
+                config['CURSOR_MODEL'] = get_input("模型名称",
+                                                    default='composer-2.5',
+                                                    required=False)
+        else:
+            config['OPENAI_API_KEY'] = get_input("API Key", required=False)
+            if config.get('OPENAI_API_KEY'):
+                config['OPENAI_BASE_URL'] = get_input("API Base URL",
+                                                       default='https://api.openai.com/v1',
+                                                       required=False)
+                config['OPENAI_MODEL'] = get_input("模型名称",
+                                                    default='gpt-4o-mini',
+                                                    required=False)
+        config['AI_CONFIDENCE_THRESHOLD'] = get_input("置信度阈值 (0-1)",
+                                                       default='0.7',
+                                                       required=False)
 
     # 5. 日报配置
     print_step(5, "日报配置")
@@ -116,12 +127,12 @@ def main():
             if value:
                 f.write(f"{key}={value}\n")
 
-    print(f"✅ 配置文件已生成: {env_file}")
+    print(f"\u2705 配置文件已生成: {env_file}")
     print("\n下一步：")
     print("1. 检查并编辑 .env 文件（如有需要）")
     print("2. 运行 python app.py 启动机器人")
     print("3. 首次运行需要输入 Telegram 验证码")
-    print("\n⚠️  重要提醒：")
+    print("\n\u26a0\ufe0f  重要提醒：")
     print("1. 请将 Bot 添加到目标频道，并授予管理员权限")
     print("2. 确保 Bot 有发送消息的权限")
     print("3. 不要将 .env 文件提交到 git")
@@ -134,5 +145,5 @@ if __name__ == '__main__':
         print("\n\n已取消配置")
         sys.exit(1)
     except Exception as e:
-        print(f"\n❌ 配置失败: {e}")
+        print(f"\n\u274c 配置失败: {e}")
         sys.exit(1)
