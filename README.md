@@ -33,61 +33,9 @@
 
 整个流程分三个阶段，每 10 分钟（可配置）自动跑一轮：
 
-```mermaid
-flowchart TD
-    subgraph S1["① 采集阶段（每 10 分钟一轮）"]
-        A["📡 从源频道拉取最新消息"]
-        B{"这条消息之前处理过吗？"}
-        SKIP["跳过，不重复处理"]
-    end
-
-    subgraph S2["② 分类阶段"]
-        D{"关键词规则分类能确定类别吗？"}
-        E["🤖 AI 分类 + 生成摘要<br/>Cursor SDK 或 OpenAI"]
-        F[("存入数据库")]
-    end
-
-    subgraph S3["③ 发布阶段"]
-        G{"置信度 ≥ 0.7 ？"}
-        H["⚡ 立即推送快讯"]
-        I["留在库里，不发快讯"]
-        J["📰 汇总当天消息<br/>按分类生成日报"]
-        K["🎯 目标频道"]
-    end
-
-    A --> B
-    B -->|"处理过"| SKIP
-    B -->|"新消息"| D
-    D -->|"能，置信度达标"| F
-    D -->|"拿不准"| E
-    E --> F
-    F --> G
-    G -->|"是"| H
-    G -->|"否"| I
-    F -.->|"每天 21:00"| J
-    H --> K
-    J --> K
-
-    classDef collect fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#0D47A1
-    classDef decision fill:#FFF9C4,stroke:#F9A825,stroke-width:2px,color:#5D4037
-    classDef ai fill:#F3E5F5,stroke:#8E24AA,stroke-width:2px,color:#4A148C
-    classDef db fill:#FFE0B2,stroke:#FB8C00,stroke-width:2px,color:#E65100
-    classDef pub fill:#C8E6C9,stroke:#43A047,stroke-width:2px,color:#1B5E20
-    classDef muted fill:#ECEFF1,stroke:#90A4AE,stroke-width:1px,color:#546E7A
-    classDef target fill:#1E88E5,stroke:#0D47A1,stroke-width:2px,color:#FFFFFF
-
-    class A collect
-    class B,D,G decision
-    class E ai
-    class F db
-    class H,J pub
-    class SKIP,I muted
-    class K target
-
-    style S1 fill:#F5FAFF,stroke:#90CAF9,stroke-width:1px,color:#1565C0
-    style S2 fill:#FBF5FD,stroke:#CE93D8,stroke-width:1px,color:#7B1FA2
-    style S3 fill:#F4FBF5,stroke:#A5D6A7,stroke-width:1px,color:#2E7D32
-```
+<div align="center">
+  <img src="docs/workflow.svg" alt="工作流程图：采集 → 分类 → 发布" width="760">
+</div>
 
 用文字说就是这五步：
 
@@ -96,6 +44,8 @@ flowchart TD
 3. **分类与摘要**：先用内置关键词规则判断类别（如“股市”→财经）；规则拿不准的才发给 AI，AI 返回类别、置信度和一句话摘要。AI 没配置或调用失败时自动回退到规则结果，程序不会停。
 4. **发快讯**：置信度 ≥ 0.7（可配置）的消息，立即由 Bot 推送到你的目标频道；不达标的只存库不推送。
 5. **发日报**：每天 21:00（可配置时间和时区），把当天所有消息按六大类目汇总，每类取置信度最高的 10 条，生成一份日报发到目标频道。
+
+> 🛠 想改这张图？源码在 [`docs/workflow.mmd`](docs/workflow.mmd)，改完用 [mermaid-cli](https://github.com/mermaid-js/mermaid-cli) 重新导出 `docs/workflow.svg` 即可。
 
 ## 💡 应用场景
 
@@ -171,6 +121,7 @@ python3 app.py
 ```
 .
 ├── RUN_SETUP.sh        # 交互式快速启动脚本（配置/验证/启动三合一）
+├── docs/               # 文档资源（工作流程图 SVG 及其 Mermaid 源码）
 └── tg_news_bot/        # 机器人主体代码
     ├── app.py          # 程序入口
     ├── config.py       # 配置管理（读取 .env）
