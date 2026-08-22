@@ -9,7 +9,14 @@ from telegram import Bot
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, TelegramError
 
-from config import TELEGRAM_BOT_TOKEN, TARGET_CHAT_ID, MESSAGE_MAX_LENGTH, AI_CONFIDENCE_THRESHOLD
+from config import (
+    TELEGRAM_BOT_TOKEN,
+    TARGET_CHAT_ID,
+    MESSAGE_MAX_LENGTH,
+    AI_CONFIDENCE_THRESHOLD,
+    BREAKING_MAX_PER_ROUND,
+    BREAKING_MAX_AGE_HOURS
+)
 from db import db
 from templates import format_breaking_news, format_daily_report, truncate_message
 
@@ -121,14 +128,25 @@ class Publisher:
             发布的消息数量
         """
         try:
-            # 获取未发布的高置信度消息
-            messages = await db.get_unpublished_messages(min_confidence=AI_CONFIDENCE_THRESHOLD)
+            # 先把超龄的未发布消息标记为跳过，防止首次运行/长时间停机后
+            # 把积压的历史旧闻当快讯轰炸目标频道（它们仍会进入日报）
+            await db.mark_stale_as_skipped(BREAKING_MAX_AGE_HOURS)
+
+            # 获取未发布的高置信度消息（限制数量 + 新鲜度，防刷屏）
+            messages = await db.get_unpublished_messages(
+                min_confidence=AI_CONFIDENCE_THRESHOLD,
+                max_age_hours=BREAKING_MAX_AGE_HOURS,
+                limit=BREAKING_MAX_PER_ROUND
+            )
 
             if not messages:
                 logger.info('没有待发布的快讯')
                 return 0
 
-            logger.info(f'找到 {len(messages)} 条待发布快讯')
+            # 按时间正序发送，读者在频道里看到的顺序更自然
+            messages.reverse()
+
+            logger.info(f'找到 {len(messages)} 条待发布快讯（本轮上限 {BREAKING_MAX_PER_ROUND} 条）')
 
             published_count = 0
             consecutive_failures = 0  # 连续失败计数器

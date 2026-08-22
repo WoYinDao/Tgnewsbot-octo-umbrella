@@ -13,10 +13,12 @@ from config import (
     FETCH_INTERVAL_MINUTES,
     DAILY_REPORT_TIME,
     DAILY_REPORT_TIMEZONE,
-    DAILY_REPORT_TOP_N
+    DAILY_REPORT_TOP_N,
+    DB_RETENTION_DAYS
 )
 from collector import collector
 from publisher import publisher
+from db import db
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,15 @@ class TaskScheduler:
         except Exception as e:
             logger.error(f'日报发布任务执行失败: {e}', exc_info=True)
 
+    async def cleanup_task(self):
+        """数据清理任务：删除超过保留期的旧消息，防止数据库无限膨胀"""
+        try:
+            logger.info('===== 开始执行数据清理 =====')
+            deleted = await db.cleanup_old_messages(DB_RETENTION_DAYS)
+            logger.info(f'===== 数据清理完成，删除 {deleted} 条 =====')
+        except Exception as e:
+            logger.error(f'数据清理任务执行失败: {e}', exc_info=True)
+
     async def collect_and_publish_task(self):
         """
         组合任务：采集 -> 发布快讯
@@ -113,6 +124,19 @@ class TaskScheduler:
             replace_existing=True
         )
         logger.info(f'已添加任务: 发布日报（每天 {DAILY_REPORT_TIME} {DAILY_REPORT_TIMEZONE}）')
+
+        # 3. 数据清理任务（每天凌晨 04:30，避开采集和日报高峰）
+        if DB_RETENTION_DAYS > 0:
+            self.scheduler.add_job(
+                self.cleanup_task,
+                trigger=CronTrigger(hour=4, minute=30, timezone=tz),
+                id='db_cleanup',
+                name='数据清理',
+                replace_existing=True
+            )
+            logger.info(f'已添加任务: 数据清理（每天 04:30，保留 {DB_RETENTION_DAYS} 天）')
+        else:
+            logger.info('数据清理已禁用（DB_RETENTION_DAYS=0，消息永久保留）')
 
     def start(self):
         """启动调度器"""

@@ -57,6 +57,13 @@ DAILY_REPORT_TIME = os.getenv('DAILY_REPORT_TIME', '21:00')  # 每天日报时�
 DAILY_REPORT_TIMEZONE = os.getenv('DAILY_REPORT_TIMEZONE', 'Asia/Taipei')
 DAILY_REPORT_TOP_N = int(os.getenv('DAILY_REPORT_TOP_N', '10'))  # 每个分类取 top N
 
+# 快讯限流配置（防止刷屏 / 旧闻轰炸）
+BREAKING_MAX_PER_ROUND = int(os.getenv('BREAKING_MAX_PER_ROUND', '5'))  # 每轮最多发几条快讯
+BREAKING_MAX_AGE_HOURS = float(os.getenv('BREAKING_MAX_AGE_HOURS', '6'))  # 只推送入库不超过 N 小时的消息
+
+# 数据保留配置
+DB_RETENTION_DAYS = int(os.getenv('DB_RETENTION_DAYS', '30'))  # 消息保留天数，0 = 永久保留
+
 # 消息配置
 MESSAGE_MAX_LENGTH = int(os.getenv('MESSAGE_MAX_LENGTH', '4000'))  # Telegram 限制 4096
 
