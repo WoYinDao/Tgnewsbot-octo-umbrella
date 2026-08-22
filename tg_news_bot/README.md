@@ -4,13 +4,13 @@
 
 ## 功能特点
 
-- 📡 **自动采集**：使用 Telethon 从指定频道/群组读取最新消息
-- 🤖 **智能分类**：结合规则引擎和 AI 对消息进行自动分类（政治/科技/游戏/财经/社会/其他）
-- 📝 **智能摘要**：AI 自动生成一句话摘要
-- ⚡ **实时推送**：高置信度消息即时推送为快讯
-- 📰 **每日日报**：每天固定时间生成分类汇总日报
-- 💾 **去重存储**：SQLite 数据库存储，自动去重
-- 🔄 **工程化**：完整的错误处理、日志记录、定时任务
+- \U0001f4e1 **自动采集**：使用 Telethon 从指定频道/群组读取最新消息
+- \U0001f916 **智能分类**：结合规则引擎和 AI 对消息进行自动分类（政治/科技/游戏/财经/社会/其他）
+- \U0001f4dd **智能摘要**：AI 自动生成一句话摘要
+- \u26a1 **实时推送**：高置信度消息即时推送为快讯
+- \U0001f4f0 **每日日报**：每天固定时间生成分类汇总日报
+- \U0001f4be **去重存储**：SQLite 数据库存储，自动去重
+- \U0001f504 **工程化**：完整的错误处理、日志记录、定时任务
 
 ## 项目结构
 
@@ -35,9 +35,11 @@ tg_news_bot/
 
 ### 1. 环境要求
 
-- Python 3.11+
+- Python 3.9+（推荐 3.11+）
 - Telegram 账号
-- OpenAI API Key（可选，用于 AI 分类）
+- AI 分类 Key（可选，二选一）：
+  - Cursor API Key（使用 Cursor 订阅的模型，从 [Cursor Dashboard](https://cursor.com/dashboard/api) 获取）
+  - OpenAI 或任何 OpenAI 兼容 API 的 Key（OpenAI / DeepSeek / OpenRouter / 本地 Ollama 等）
 
 ### 2. 安装依赖
 
@@ -133,8 +135,15 @@ SOURCE_CHANNELS=@channel1,@channel2
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
 TARGET_CHAT_ID=-1001234567890
 
-# AI 配置（可选）
-OPENAI_API_KEY=sk-your-openai-key
+# AI 配置（可选，两种后端二选一）
+# 方式一：Cursor SDK（优先级更高）
+CURSOR_API_KEY=your-cursor-api-key
+CURSOR_MODEL=composer-2.5
+
+# 方式二：OpenAI 兼容 API
+# OPENAI_API_KEY=sk-your-key
+# OPENAI_BASE_URL=https://api.openai.com/v1
+# OPENAI_MODEL=gpt-4o-mini
 ```
 
 ### 4. 验证配置
@@ -287,19 +296,19 @@ sudo journalctl -u tg-news-bot -f
 **原因：** 未配置或 API Key 无效
 
 **解决方法：**
-1. 检查 `.env` 中的 `OPENAI_API_KEY` 是否正确
+1. 检查 `.env` 中的 `CURSOR_API_KEY` 或 `OPENAI_API_KEY` 是否正确
 2. 确认 API Key 有足够的额度
-3. 如果使用第三方 API，检查 `OPENAI_BASE_URL` 配置
-4. **重要**：当前版本使用 `openai==0.10.5`，需要配置 `OPENAI_MODEL=text-davinci-003` 或其他 Completion API 支持的模型
+3. 如果使用 OpenAI 兼容的第三方 API，检查 `OPENAI_BASE_URL` 配置
+4. 同时配置了两个 Key 时，优先使用 Cursor SDK
 5. 如果 AI 分类失败，系统会自动回退到规则分类，不影响基本功能
 6. 查看日志文件 `logs/app.log` 获取详细错误信息
 
 ### Q6: 消息格式显示异常
 
-**原因：** Markdown 格式解析错误
+**原因：** HTML 格式解析错误
 
 **解决方法：**
-- 检查消息中是否有特殊字符（如 `*`, `_`, `[`, `]`）
+- 消息使用 HTML 解析模式，动态内容已自动转义；如果仍然解析失败，会自动降级为纯文本发送
 - 在 `templates.py` 中可以调整格式化逻辑
 - 或在 `publisher.py` 中将 `parse_mode` 改为 `None`
 
@@ -380,12 +389,7 @@ DAILY_REPORT_TIME=08:00
 
 ## 安全建议
 
-1. **不要将 `.env` 文件提交到 git**
-   ```bash
-   echo ".env" >> .gitignore
-   echo "*.session" >> .gitignore
-   echo "news.db" >> .gitignore
-   ```
+1. **不要将 `.env` 文件提交到 git**（仓库根目录已附带 `.gitignore`，覆盖 `.env` / `*.session` / `news.db`）
 
 2. **定期备份数据库**
    ```bash
