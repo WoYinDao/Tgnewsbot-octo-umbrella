@@ -60,6 +60,22 @@ DAILY_REPORT_TOP_N = int(os.getenv('DAILY_REPORT_TOP_N', '10'))  # 每个分类�
 # 快讯限流配置（防止刷屏 / 旧闻轰炸）
 BREAKING_MAX_PER_ROUND = int(os.getenv('BREAKING_MAX_PER_ROUND', '5'))  # 每轮最多发几条快讯
 BREAKING_MAX_AGE_HOURS = float(os.getenv('BREAKING_MAX_AGE_HOURS', '6'))  # 只推送入库不超过 N 小时的消息
+BREAKING_MIN_SCORE = float(os.getenv('BREAKING_MIN_SCORE', '6'))  # AI 新闻价值分门槛（0-10，未打分的消息不受此限制）
+
+# 语义去重配置（识别不同频道对同一事件的相似报道）
+SEMANTIC_DEDUP_ENABLED = os.getenv('SEMANTIC_DEDUP_ENABLED', 'true').lower() in ('1', 'true', 'yes')
+# 后端：ngram = 本地字符 n-gram 相似度（免费，默认）；embedding = OpenAI 兼容向量接口（需 OPENAI_API_KEY）
+SEMANTIC_DEDUP_BACKEND = os.getenv('SEMANTIC_DEDUP_BACKEND', 'ngram')
+# 判重阈值：留空则按后端取默认（ngram 0.55 / embedding 0.90）
+_dedup_threshold = os.getenv('SEMANTIC_DEDUP_THRESHOLD', '').strip()
+SEMANTIC_DEDUP_THRESHOLD = float(_dedup_threshold) if _dedup_threshold else None
+SEMANTIC_DEDUP_WINDOW_HOURS = float(os.getenv('SEMANTIC_DEDUP_WINDOW_HOURS', '48'))  # 只和最近 N 小时的消息比对
+EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'text-embedding-3-small')
+
+# Bot 管理命令：允许使用命令的 Telegram 用户 ID（逗号分隔，留空则禁用命令功能）
+ADMIN_USER_IDS = [
+    int(x.strip()) for x in os.getenv('ADMIN_USER_IDS', '').split(',') if x.strip().lstrip('-').isdigit()
+]
 
 # 数据保留配置
 DB_RETENTION_DAYS = int(os.getenv('DB_RETENTION_DAYS', '30'))  # 消息保留天数，0 = 永久保留

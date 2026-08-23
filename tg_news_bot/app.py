@@ -12,6 +12,9 @@ from collector import collector
 from classifier import classifier
 from publisher import publisher
 from scheduler import scheduler
+from runtime import runtime
+from dedup import deduper
+from bot_commands import command_bot
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +37,17 @@ class Application:
             # 初始化数据库
             await db.init_db()
 
+            # 加载运行时配置（Bot 命令修改过的源频道、阈值等）
+            await runtime.load()
+
             # 初始化采集器
             await collector.init_client()
 
             # 初始化发布器
             await publisher.init_bot()
+
+            # 启动 Bot 管理命令（未配置 ADMIN_USER_IDS 时自动跳过）
+            await command_bot.start()
 
             logger.info('应用初始化完成')
 
@@ -95,6 +104,9 @@ class Application:
             # 停止调度器
             scheduler.stop()
 
+            # 停止 Bot 管理命令
+            await command_bot.stop()
+
             # 关闭采集器
             await collector.close()
 
@@ -103,6 +115,9 @@ class Application:
 
             # 关闭分类器（释放 AI 客户端）
             await classifier.close()
+
+            # 关闭去重器（释放向量接口客户端）
+            await deduper.close()
 
             # 关闭数据库
             await db.close()

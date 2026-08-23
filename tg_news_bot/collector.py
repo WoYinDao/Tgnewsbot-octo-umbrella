@@ -11,13 +11,16 @@ from config import (
     TELETHON_API_ID,
     TELETHON_API_HASH,
     TELETHON_SESSION,
-    SOURCE_CHANNELS,
     FETCH_LIMIT,
     BASE_DIR,
-    DAILY_REPORT_TIMEZONE
+    DAILY_REPORT_TIMEZONE,
+    SEMANTIC_DEDUP_WINDOW_HOURS
 )
 from db import db
 from classifier import classifier
+from filters import message_filter
+from dedup import deduper
+from runtime import runtime
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +124,11 @@ class Collector:
 
             logger.info(f'从 {channel} 获取到 {len(messages)} 条新消息')
 
+            # 近期消息缓存，供语义去重比对（含本批已入库的，防止同批内重复）
+            recent_for_dedup = []
+            if messages and deduper.enabled:
+                recent_for_dedup = await db.get_recent_for_dedup(SEMANTIC_DEDUP_WINDOW_HOURS)
+
             # 处理消息
             report_tz = pytz.timezone(DAILY_REPORT_TIMEZONE)
             new_count = 0
@@ -133,9 +141,21 @@ class Collector:
                         logger.debug(f'跳过过短的消息: {msg.id}')
                         continue
 
-                    # 先查重（含跨频道内容查重），避免重复调用 AI 分类浪费费用
+                    # 广告黑名单 / 关注白名单过滤
+                    allowed, reason = message_filter.check(text)
+                    if not allowed:
+                        logger.info(f'消息被过滤: {channel}/{msg.id}（{reason}）')
+                        continue
+
+                    # 精确查重（含跨频道内容查重），避免重复调用 AI 分类浪费费用
                     if await db.message_exists(channel, msg.id, text):
                         logger.debug(f'消息已存在，跳过: {channel}/{msg.id}')
+                        continue
+
+                    # 语义去重：识别同一事件的相似报道
+                    is_dup, similarity, embedding_json = await deduper.check(text, recent_for_dedup)
+                    if is_dup:
+                        logger.info(f'消息与近期报道语义重复（{similarity:.2f}），跳过: {channel}/{msg.id}')
                         continue
 
                     # 使用分类器
@@ -152,11 +172,15 @@ class Collector:
                         text=text,
                         category=classification['category'],
                         confidence=classification['confidence'],
-                        summary=classification['summary']
+                        summary=classification['summary'],
+                        score=classification.get('score'),
+                        embedding=embedding_json
                     )
 
                     if msg_id:
                         new_count += 1
+                        # 加入去重缓存，同一批内的相似消息也能被拦截
+                        recent_for_dedup.append({'id': msg_id, 'text': text, 'embedding': embedding_json})
                         logger.info(
                             f'新消息已入库: {channel}/{msg.id} -> '
                             f'{classification["category"]} ({classification["confidence"]:.2f})'
@@ -190,14 +214,18 @@ class Collector:
             return 0
 
     async def collect_all(self):
-        """采集所有配置的频道"""
-        if not SOURCE_CHANNELS:
-            logger.warning('未配置采集源（SOURCE_CHANNELS）')
+        """采集所有配置的频道（源列表来自运行时配置，可用 Bot 命令增删）"""
+        if runtime.paused:
+            logger.info('采集已暂停（用 /resume 命令恢复），本轮跳过')
+            return 0
+
+        if not runtime.sources:
+            logger.warning('未配置采集源（SOURCE_CHANNELS 或 /addsource 命令）')
             return
 
         total_new = 0
 
-        for channel in SOURCE_CHANNELS:
+        for channel in runtime.sources:
             # 跳过仍在 FloodWait 冷却期的频道
             flood_until = self._flood_until.get(channel, 0)
             if flood_until > time.monotonic():

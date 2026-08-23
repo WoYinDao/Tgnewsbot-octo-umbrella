@@ -54,12 +54,17 @@ RULE_KEYWORDS = {
 
 VALID_CATEGORIES = ['politics', 'tech', 'game', 'finance', 'society', 'other']
 
-CLASSIFY_PROMPT = """你是一个专业的新闻分类助手。请对以下新闻文本进行分类，并生成一句话摘要。
+CLASSIFY_PROMPT = """你是一个专业的新闻编辑。请对以下新闻文本进行分类、生成一句话摘要，并给出新闻价值分。
 
 分类必须是以下之一：politics（政治）、tech（科技）、game（游戏）、finance（财经）、society（社会）、other（其他）
 
+新闻价值分 score 为 0-10 的数字，衡量这条消息值不值得实时推送给读者：
+- 8-10：重大突发、影响广泛（重要政策发布、重大事故、行业巨变）
+- 4-7：一般新闻，有信息量但非紧急
+- 0-3：琐碎内容、旧闻回顾、软文推广、无实质信息
+
 请严格按照以下 JSON 格式返回（不要添加任何其他文字）：
-{{"category": "分类", "confidence": 0.85, "summary": "一句话摘要"}}
+{{"category": "分类", "confidence": 0.85, "summary": "一句话摘要", "score": 7}}
 
 新闻文本：
 {text}"""
@@ -190,12 +195,16 @@ class Classifier:
         使用 AI 进行分类和摘要生成
 
         Returns:
-            {"category": str, "confidence": float, "summary": str}
+            {"category": str, "confidence": float, "summary": str, "score": float | None}
+
+        score 是 0-10 的新闻价值分（发布端用它做快讯门槛）；
+        AI 不可用或解析失败时为 None，表示“未打分”，不参与门槛过滤。
         """
         fallback = {
             'category': 'other',
             'confidence': 0.0,
-            'summary': text[:100] + ('...' if len(text) > 100 else '')
+            'summary': text[:100] + ('...' if len(text) > 100 else ''),
+            'score': None
         }
 
         if not self.enabled:
@@ -223,7 +232,17 @@ class Classifier:
             result['confidence'] = max(0.0, min(1.0, float(result.get('confidence', 0.5))))
             result['summary'] = str(result['summary'])
 
-            logger.info(f"AI 分类成功: {result['category']} (confidence: {result['confidence']:.2f})")
+            # 新闻价值分：陳制到 0-10，缺失或非法时视为未打分
+            try:
+                result['score'] = max(0.0, min(10.0, float(result['score'])))
+            except (KeyError, TypeError, ValueError):
+                result['score'] = None
+
+            score_text = f"{result['score']:.0f}" if result['score'] is not None else '未打分'
+            logger.info(
+                f"AI 分类成功: {result['category']} "
+                f"(confidence: {result['confidence']:.2f}, score: {score_text})"
+            )
             return result
 
         except json.JSONDecodeError as e:
@@ -238,7 +257,9 @@ class Classifier:
         综合分类流程：先规则后 AI
 
         Returns:
-            {"category": str, "confidence": float, "summary": str}
+            {"category": str, "confidence": float, "summary": str, "score": float | None}
+
+        规则分类不打分（score 为 None），发布端对未打分的消息只看置信度门槛。
         """
         text = text.strip()
 
@@ -246,7 +267,8 @@ class Classifier:
             return {
                 'category': 'other',
                 'confidence': 0.0,
-                'summary': ''
+                'summary': '',
+                'score': None
             }
 
         # 1. 先尝试规则分类
@@ -258,7 +280,8 @@ class Classifier:
             return {
                 'category': rule_category,
                 'confidence': rule_confidence,
-                'summary': text[:100] + ('...' if len(text) > 100 else '')
+                'summary': text[:100] + ('...' if len(text) > 100 else ''),
+                'score': None
             }
 
         # 3. 否则使用 AI 分类
@@ -271,7 +294,8 @@ class Classifier:
             return {
                 'category': rule_category,
                 'confidence': rule_confidence,
-                'summary': text[:100] + ('...' if len(text) > 100 else '')
+                'summary': text[:100] + ('...' if len(text) > 100 else ''),
+                'score': None
             }
 
         return ai_result

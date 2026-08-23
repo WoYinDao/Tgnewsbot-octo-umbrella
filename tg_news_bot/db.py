@@ -33,6 +33,8 @@ class Database:
                 category TEXT,
                 confidence REAL,
                 summary TEXT,
+                score REAL,
+                embedding TEXT,
                 published INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL,
                 UNIQUE(source, msg_id)
@@ -47,6 +49,20 @@ class Database:
                 updated_at TEXT NOT NULL
             )
         ''')
+
+        # 运行时设置表：Bot 命令修改的配置（源频道、阈值等）持久化在这里，
+        # 优先级高于 .env 中的同名配置
+        await self.conn.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+
+        # 老库升级：补充新增列（score = AI 新闻价值分，embedding = 语义去重向量）
+        await self._ensure_column('messages', 'score', 'REAL')
+        await self._ensure_column('messages', 'embedding', 'TEXT')
 
         # 创建索引
         await self.conn.execute('CREATE INDEX IF NOT EXISTS idx_text_hash ON messages(text_hash)')
@@ -69,10 +85,37 @@ class Database:
             except Exception as e:
                 logger.error(f'关闭数据库连接失败: {e}')
 
+    async def _ensure_column(self, table: str, column: str, col_type: str):
+        """老数据库自动迁移：缺列则 ALTER TABLE 补上"""
+        async with self.conn.execute(f'PRAGMA table_info({table})') as cursor:
+            cols = [row[1] for row in await cursor.fetchall()]
+        if column not in cols:
+            await self.conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} {col_type}')
+            logger.info(f'数据库迁移：{table} 表新增列 {column}')
+
     @staticmethod
     def calculate_hash(text: str) -> str:
         """计算文本的哈希值用于去重"""
         return hashlib.md5(text.encode('utf-8')).hexdigest()
+
+    # ---------- 运行时设置 ----------
+
+    async def get_setting(self, key: str) -> Optional[str]:
+        """读取运行时设置，不存在返回 None"""
+        async with self.conn.execute(
+            'SELECT value FROM settings WHERE key = ?', (key,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+    async def set_setting(self, key: str, value: str):
+        """写入运行时设置"""
+        await self.conn.execute(
+            '''INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at''',
+            (key, str(value), datetime.now().isoformat())
+        )
+        await self.conn.commit()
 
     async def message_exists(self, source: str, msg_id: Optional[int], text: str) -> bool:
         """
@@ -106,7 +149,9 @@ class Database:
         text: str,
         category: str = 'other',
         confidence: float = 0.0,
-        summary: str = ''
+        summary: str = '',
+        score: Optional[float] = None,
+        embedding: Optional[str] = None
     ) -> Optional[int]:
         """
         插入新消息
@@ -121,9 +166,9 @@ class Database:
 
         cursor = await self.conn.execute(
             '''INSERT OR IGNORE INTO messages
-            (source, msg_id, date, text, text_hash, category, confidence, summary, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-            (source, msg_id, date.isoformat(), text, text_hash, category, confidence, summary, created_at)
+            (source, msg_id, date, text, text_hash, category, confidence, summary, score, embedding, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (source, msg_id, date.isoformat(), text, text_hash, category, confidence, summary, score, embedding, created_at)
         )
         await self.conn.commit()
 
@@ -138,7 +183,8 @@ class Database:
         self,
         min_confidence: float = 0.7,
         max_age_hours: Optional[float] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        min_score: Optional[float] = None
     ) -> List[Dict]:
         """
         获取未发布的高置信度消息
@@ -147,6 +193,8 @@ class Database:
             min_confidence: 最低置信度
             max_age_hours: 只取入库时间在最近 N 小时内的消息（防止旧闻轰炸）
             limit: 最多返回 N 条（防止单轮刷屏）
+            min_score: AI 新闻价值分门槛（0-10）；未打分（score 为 NULL，
+                       例如 AI 未配置时的规则分类消息）不受此限制
         """
         sql = '''SELECT id, source, msg_id, date, text, category, confidence, summary
             FROM messages
@@ -157,6 +205,10 @@ class Database:
             cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat()
             sql += ' AND created_at >= ?'
             params.append(cutoff)
+
+        if min_score is not None:
+            sql += ' AND (score IS NULL OR score >= ?)'
+            params.append(min_score)
 
         sql += ' ORDER BY date DESC'
 
@@ -229,6 +281,20 @@ class Database:
             (channel, msg_id, datetime.now().isoformat())
         )
         await self.conn.commit()
+
+    async def get_recent_for_dedup(self, window_hours: float, limit: int = 300) -> List[Dict]:
+        """
+        获取最近入库的消息（id、文本、向量），供语义去重比对
+        """
+        cutoff = (datetime.now() - timedelta(hours=window_hours)).isoformat()
+        async with self.conn.execute(
+            '''SELECT id, text, embedding FROM messages
+            WHERE created_at >= ?
+            ORDER BY id DESC LIMIT ?''',
+            (cutoff, limit)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [{'id': r[0], 'text': r[1], 'embedding': r[2]} for r in rows]
 
     async def cleanup_old_messages(self, retention_days: int) -> int:
         """

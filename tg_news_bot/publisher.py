@@ -13,11 +13,11 @@ from config import (
     TELEGRAM_BOT_TOKEN,
     TARGET_CHAT_ID,
     MESSAGE_MAX_LENGTH,
-    AI_CONFIDENCE_THRESHOLD,
     BREAKING_MAX_PER_ROUND,
     BREAKING_MAX_AGE_HOURS
 )
 from db import db
+from runtime import runtime
 from templates import format_breaking_news, format_daily_report, truncate_message
 
 logger = logging.getLogger(__name__)
@@ -132,11 +132,13 @@ class Publisher:
             # 把积压的历史旧闻当快讯轰炸目标频道（它们仍会进入日报）
             await db.mark_stale_as_skipped(BREAKING_MAX_AGE_HOURS)
 
-            # 获取未发布的高置信度消息（限制数量 + 新鲜度，防刷屏）
+            # 获取未发布的高置信度消息（限制数量 + 新鲜度 + 价值分门槛，防刷屏）
+            # 阈值来自运行时配置，可用 /threshold 和 /minscore 命令调整
             messages = await db.get_unpublished_messages(
-                min_confidence=AI_CONFIDENCE_THRESHOLD,
+                min_confidence=runtime.confidence_threshold,
                 max_age_hours=BREAKING_MAX_AGE_HOURS,
-                limit=BREAKING_MAX_PER_ROUND
+                limit=BREAKING_MAX_PER_ROUND,
+                min_score=runtime.min_score if runtime.min_score > 0 else None
             )
 
             if not messages:
