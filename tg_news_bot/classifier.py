@@ -198,7 +198,7 @@ class Classifier:
             {"category": str, "confidence": float, "summary": str, "score": float | None}
 
         score 是 0-10 的新闻价值分（发布端用它做快讯门槛）；
-        AI 不可用或解析失败时为 None，表示“未打分”，不参与门槛过滤。
+        AI 不可用或解析失败时为 None，表示未打分，不参与门槛过滤。
         """
         fallback = {
             'category': 'other',
@@ -232,7 +232,7 @@ class Classifier:
             result['confidence'] = max(0.0, min(1.0, float(result.get('confidence', 0.5))))
             result['summary'] = str(result['summary'])
 
-            # 新闻价值分：陳制到 0-10，缺失或非法时视为未打分
+            # 新闻价值分：钐制到 0-10 范围，缺失或非法时视为未打分
             try:
                 result['score'] = max(0.0, min(10.0, float(result['score'])))
             except (KeyError, TypeError, ValueError):
