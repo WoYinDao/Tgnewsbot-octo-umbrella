@@ -1,10 +1,12 @@
 <div align="center">
 
-# 📡 Tgnewsbot
+# 📡 TgNewsRadar
 
-**Telegram 新闻播报机器人**
+**Telegram 新闻雷达 · AI 新闻聚合机器人**
 
-自动采集 · AI 分类摘要 · 实时快讯 · 每日日报
+自动采集 · 去广告去重 · AI 分类打分 · 实时快讯 · 每日日报
+
+<sub>Telegram news aggregator bot · AI classification &amp; scoring · ad-filter · semantic dedupe · real-time alerts &amp; daily digest · Telethon · ChatGPT / OpenAI</sub>
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Telethon](https://img.shields.io/badge/Telethon-1.36%2B-2CA5E0?logo=telegram&logoColor=white)](https://github.com/LonamiWebs/Telethon)
@@ -82,8 +84,8 @@
 
 ```bash
 # 1️⃣ 克隆仓库
-git clone https://github.com/WoYinDao/Tgnewsbot-octo-umbrella.git
-cd Tgnewsbot-octo-umbrella/tg_news_bot
+git clone https://github.com/WoYinDao/TgNewsRadar.git
+cd TgNewsRadar/tg_news_bot
 
 # 2️⃣ 安装依赖
 python3 -m venv venv && source venv/bin/activate
@@ -170,6 +172,6 @@ python3 app.py
 
 <div align="center">
 
-欢迎提交 [Issue](https://github.com/WoYinDao/Tgnewsbot-octo-umbrella/issues) 和 Pull Request 🎉
+欢迎提交 [Issue](https://github.com/WoYinDao/TgNewsRadar/issues) 和 Pull Request 🎉
 
 </div>
